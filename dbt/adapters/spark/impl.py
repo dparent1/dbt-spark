@@ -124,6 +124,7 @@ class SparkAdapter(SQLAdapter):
     def list_relations_without_caching(
         self, schema_relation: SparkRelation
     ) -> List[SparkRelation]:
+        logger.debug("list_relations_without_caching")
         kwargs = {"schema_relation": schema_relation}
         try:
             results = self.execute_macro(LIST_RELATIONS_MACRO_NAME, kwargs=kwargs)
@@ -144,15 +145,21 @@ class SparkAdapter(SQLAdapter):
                     f"got {len(row)} values, expected 4"
                 )
             _schema, name, _, information = row
+            logger.debug(row)
+
             rel_type = RelationType.View if "Type: VIEW" in information else RelationType.Table
             is_delta = "Provider: delta" in information
+            is_iceberg = 'Provider: iceberg' in information
+            # TODO: DAP & jcc hardcoded for now, need a way to determine if table is iceberg or not
+            is_iceberg = True
             is_hudi = "Provider: hudi" in information
             relation = self.Relation.create(
-                schema=_schema,
+                schema=schema_relation.schema,# _schema, jcc?  TODO: DAP
                 identifier=name,
                 type=rel_type,
                 information=information,
                 is_delta=is_delta,
+                is_iceberg=is_iceberg,
                 is_hudi=is_hudi,
             )
             relations.append(relation)
@@ -162,6 +169,7 @@ class SparkAdapter(SQLAdapter):
     def get_relation(
         self, database: Optional[str], schema: str, identifier: str
     ) -> Optional[BaseRelation]:
+        logger.debug("get_relation")
         if not self.Relation.include_policy.database:
             database = None
 
@@ -170,6 +178,7 @@ class SparkAdapter(SQLAdapter):
     def parse_describe_extended(
         self, relation: Relation, raw_rows: List[agate.Row]
     ) -> List[SparkColumn]:
+        logger.debug("parse_describe_extended")
         # Convert the Row to a dict
         dict_rows = [dict(zip(row._keys, row._values)) for row in raw_rows]
         # Find the separator between the rows and the metadata provided
@@ -207,6 +216,7 @@ class SparkAdapter(SQLAdapter):
         return pos
 
     def get_columns_in_relation(self, relation: Relation) -> List[SparkColumn]:
+        logger.debug("get_columns_in_relation")
         cached_relations = self.cache.get_relations(relation.database, relation.schema)
         cached_relation = next(
             (
@@ -267,7 +277,21 @@ class SparkAdapter(SQLAdapter):
         return columns
 
     def _get_columns_for_catalog(self, relation: SparkRelation) -> Iterable[Dict[str, Any]]:
-        columns = self.parse_columns_from_information(relation)
+         # TODO: DAP cccs-jc In the case of iceberg
+        # we do not have information on the relation
+        # cannot issue a show tables extended in
+        # Instead we do like delta lake get_columns_in_relation
+
+        columns = []
+        if relation and relation.information:
+            columns = self.parse_columns_from_information(relation)
+        else:
+            # in open source delta 'show table extended' query output doesnt
+            # return relation's schema. if columns are empty from cache,
+            # use get_columns_in_relation spark macro
+            # which would execute 'describe extended tablename' query
+            rows: List[agate.Row] = super().get_columns_in_relation(relation)
+            columns = self.parse_describe_extended(relation, rows)
 
         for column in columns:
             # convert SparkColumns into catalog dicts
@@ -285,10 +309,12 @@ class SparkAdapter(SQLAdapter):
 
     def get_catalog(self, manifest):
         schema_map = self._get_catalog_schemas(manifest)
-        if len(schema_map) > 1:
-            dbt.exceptions.raise_compiler_error(
-                f"Expected only one database in get_catalog, found " f"{list(schema_map)}"
-            )
+        # TODO: DAP jcc removed this check, not sure why I get two catalogs and why there is a check here..
+        # if len(schema_map) > 1:
+        #     dbt.exceptions.raise_compiler_error(
+        #         f'Expected only one database in get_catalog, found '
+        #         f'{list(schema_map)}'
+        #     )
 
         with executor(self.config) as tpe:
             futures: List[Future[agate.Table]] = []
@@ -323,6 +349,8 @@ class SparkAdapter(SQLAdapter):
         return agate.Table.from_object(columns, column_types=DEFAULT_TYPE_TESTER)
 
     def check_schema_exists(self, database, schema):
+        print(f"database:{database}, schema:{schema}")
+        logger.debug("check_schema_exists")
         results = self.execute_macro(LIST_SCHEMAS_MACRO_NAME, kwargs={"database": database})
 
         exists = True if schema in [row[0] for row in results] else False

@@ -1,5 +1,10 @@
 from contextlib import contextmanager
 
+from pyspark import SparkConf
+import pyspark.sql.functions as F
+from pyspark.sql import SparkSession
+import sqlparams
+
 import dbt.exceptions
 from dbt.adapters.base import Credentials
 from dbt.adapters.sql import SQLConnectionManager
@@ -21,7 +26,7 @@ try:
 except ImportError:
     pyodbc = None
 from datetime import datetime
-import sqlparams
+
 
 from hologram.helpers import StrEnum
 from dataclasses import dataclass, field
@@ -38,6 +43,9 @@ except ImportError:
 
 import base64
 import time
+import importlib
+import sqlalchemy
+import re
 
 logger = AdapterLogger("Spark")
 
@@ -53,6 +61,7 @@ class SparkConnectionMethod(StrEnum):
     HTTP = "http"
     ODBC = "odbc"
     SESSION = "session"
+    PYSPARK = "pyspark"
 
 
 @dataclass
@@ -74,6 +83,8 @@ class SparkCredentials(Credentials):
     use_ssl: bool = False
     server_side_parameters: Dict[str, Any] = field(default_factory=dict)
     retry_all: bool = False
+    python_module: Optional[str] = None
+    spark_configuration: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def __pre_deserialize__(cls, data):
@@ -83,6 +94,22 @@ class SparkCredentials(Credentials):
         return data
 
     def __post_init__(self):
+        if self.method == SparkConnectionMethod.PYSPARK:
+
+            spark_conf = SparkConf()
+            spark_conf.setAll([(k, v) for k, v in self.spark_configuration.items()])
+
+            if self.python_module:
+                path = self.python_module
+                logger.debug(f"SparkCredentials attempting to load spark context from {path}")
+                module = importlib.import_module(path)
+                create_spark_context = getattr(module, "create_spark_context")
+                create_spark_context(spark_conf)
+            else:
+                spark = SparkSession.builder.config(conf=spark_conf).getOrCreate()
+                spark._sc.setLogLevel("ERROR")
+            return
+
         # spark classifies database and schema as the same thing
         if self.database is not None and self.database != self.schema:
             raise dbt.exceptions.RuntimeException(
@@ -144,6 +171,98 @@ class SparkCredentials(Credentials):
 
     def _connection_keys(self):
         return ("host", "port", "cluster", "endpoint", "schema", "organization")
+
+
+class PysparkConnectionWrapper(object):
+    """Wrap a Spark context"""
+
+    def __init__(self, handle):
+        self.handle = handle
+        self._cursor = None
+        self.spark = SparkSession._activeSession
+
+    def cursor(self):
+        return self
+
+    def cancel(self):
+        if self._cursor:
+            # Handle bad response in the pyhive lib when
+            # the connection is cancelled
+            try:
+                self._cursor.cancel()
+            except EnvironmentError as exc:
+                logger.debug(
+                    "Exception while cancelling query: {}".format(exc)
+                )
+
+    def close(self):
+        if self._cursor:
+            # Handle bad response in the pyhive lib when
+            # the connection is cancelled
+            try:
+                self._cursor.close()
+            except EnvironmentError as exc:
+                logger.debug(
+                    "Exception while closing cursor: {}".format(exc)
+                )
+
+    def rollback(self, *args, **kwargs):
+        logger.debug("NotImplemented: rollback")
+
+    def fetchall(self):
+        try:
+            rows = self.result.collect()
+            logger.debug(rows)
+        except Exception as e:
+            logger.debug(f"raising error {e}")
+            dbt.exceptions.raise_database_error(e)
+        return rows
+
+    def execute(self, sql, bindings=None):
+        if sql.strip().endswith(";"):
+            sql = sql.strip()[:-1]
+
+        # remove comment line, iceberg procedure do not accept comments.
+        # reported here https://github.com/apache/iceberg/issues/4289
+        sql = re.sub(r'/\*.*\*/', '', sql)
+
+        if bindings is not None:
+            bindings = [self._fix_binding(binding) for binding in bindings]
+            sql = sql % tuple(bindings)
+        logger.debug(f"execute sql:{sql}")
+
+        try:
+            self.result = self.spark.sql(sql)
+            logger.debug("Executed with no errors")
+            if "show tables" in sql:
+                self.result = self.result.withColumn("description", F.lit(""))
+        except Exception as e:
+            logger.debug(f"raising error {e}")
+            dbt.exceptions.raise_database_error(e)
+
+    @classmethod
+    def _fix_binding(cls, value):
+        """Convert complex datatypes to primitives that can be loaded by
+           the Spark driver"""
+        if isinstance(value, NUMBERS):
+            return float(value)
+        elif isinstance(value, datetime):
+            return "'" + value.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3] + "'"
+        elif isinstance(value, str):
+            return "'" + value + "'"
+        else:
+            logger.debug(type(value))
+            return "'" + str(value) + "'"
+
+    @property
+    def description(self):
+        logger.debug(f"description called returning list of columns: {self.result.columns}")
+        ret = []
+        # Not sure the type is every used...
+        t = sqlalchemy.types.String
+        for c in self.result.columns:
+            ret.append((c,t))
+        return ret
 
 
 class PyhiveConnectionWrapper(object):

@@ -1,8 +1,16 @@
-{% macro file_format_clause() %}
-  {{ return(adapter.dispatch('file_format_clause', 'dbt')()) }}
+{% macro dbt_spark_tblproperties_clause() -%}
+  {%- set tblproperties = config.get('tblproperties') -%}
+  {%- if tblproperties is not none %}
+    tblproperties (
+      {%- for prop in tblproperties -%}
+      '{{ prop }}' = '{{ tblproperties[prop] }}' {% if not loop.last %}, {% endif %}
+      {%- endfor %}
+    )
+  {%- endif %}
 {%- endmacro -%}
 
-{% macro spark__file_format_clause() %}
+
+{% macro file_format_clause() %}
   {%- set file_format = config.get('file_format', validator=validation.any[basestring]) -%}
   {%- if file_format is not none %}
     using {{ file_format }}
@@ -11,10 +19,6 @@
 
 
 {% macro location_clause() %}
-  {{ return(adapter.dispatch('location_clause', 'dbt')()) }}
-{%- endmacro -%}
-
-{% macro spark__location_clause() %}
   {%- set location_root = config.get('location_root', validator=validation.any[basestring]) -%}
   {%- set identifier = model['alias'] -%}
   {%- if location_root is not none %}
@@ -24,10 +28,6 @@
 
 
 {% macro options_clause() -%}
-  {{ return(adapter.dispatch('options_clause', 'dbt')()) }}
-{%- endmacro -%}
-
-{% macro spark__options_clause() -%}
   {%- set options = config.get('options') -%}
   {%- if config.get('file_format') == 'hudi' -%}
     {%- set unique_key = config.get('unique_key') -%}
@@ -51,10 +51,6 @@
 
 
 {% macro comment_clause() %}
-  {{ return(adapter.dispatch('comment_clause', 'dbt')()) }}
-{%- endmacro -%}
-
-{% macro spark__comment_clause() %}
   {%- set raw_persist_docs = config.get('persist_docs', {}) -%}
 
   {%- if raw_persist_docs is mapping -%}
@@ -69,10 +65,6 @@
 
 
 {% macro partition_cols(label, required=false) %}
-  {{ return(adapter.dispatch('partition_cols', 'dbt')(label, required)) }}
-{%- endmacro -%}
-
-{% macro spark__partition_cols(label, required=false) %}
   {%- set cols = config.get('partition_by', validator=validation.any[list, basestring]) -%}
   {%- if cols is not none %}
     {%- if cols is string -%}
@@ -89,10 +81,6 @@
 
 
 {% macro clustered_cols(label, required=false) %}
-  {{ return(adapter.dispatch('clustered_cols', 'dbt')(label, required)) }}
-{%- endmacro -%}
-
-{% macro spark__clustered_cols(label, required=false) %}
   {%- set cols = config.get('clustered_by', validator=validation.any[list, basestring]) -%}
   {%- set buckets = config.get('buckets', validator=validation.any[int]) -%}
   {%- if (cols is not none) and (buckets is not none) %}
@@ -117,12 +105,8 @@
 {%- endmacro %}
 
 
-{% macro create_temporary_view(relation, sql) -%}
-  {{ return(adapter.dispatch('create_temporary_view', 'dbt')(relation, sql)) }}
-{%- endmacro -%}
-
 {#-- We can't use temporary tables with `create ... as ()` syntax #}
-{% macro spark__create_temporary_view(relation, sql) -%}
+{% macro create_temporary_view(relation, sql) -%}
   create temporary view {{ relation.include(schema=false) }} as
     {{ sql }}
 {% endmacro %}
@@ -134,6 +118,8 @@
   {%- else -%}
     {% if config.get('file_format', validator=validation.any[basestring]) == 'delta' %}
       create or replace table {{ relation }}
+    {% elif config.get('file_format', validator=validation.any[basestring]) == 'iceberg' %}
+      create or replace table {{ relation }}
     {% else %}
       create table {{ relation }}
     {% endif %}
@@ -141,6 +127,7 @@
     {{ options_clause() }}
     {{ partition_cols(label="partitioned by") }}
     {{ clustered_cols(label="clustered by") }}
+    {{ dbt_spark_tblproperties_clause() }}
     {{ location_clause() }}
     {{ comment_clause() }}
     as
@@ -168,15 +155,11 @@
   {%- endcall -%}
 {% endmacro %}
 
-{% macro get_columns_in_relation_raw(relation) -%}
-  {{ return(adapter.dispatch('get_columns_in_relation_raw', 'dbt')(relation)) }}
-{%- endmacro -%}
-
-{% macro spark__get_columns_in_relation_raw(relation) -%}
-  {% call statement('get_columns_in_relation_raw', fetch_result=True) %}
+{% macro spark__get_columns_in_relation(relation) -%}
+  {% call statement('get_columns_in_relation', fetch_result=True) %}
       describe extended {{ relation.include(schema=(schema is not none)) }}
   {% endcall %}
-  {% do return(load_result('get_columns_in_relation_raw').table) %}
+  {% do return(load_result('get_columns_in_relation').table) %}
 {% endmacro %}
 
 {% macro spark__get_columns_in_relation(relation) -%}
@@ -185,7 +168,7 @@
 
 {% macro spark__list_relations_without_caching(relation) %}
   {% call statement('list_relations_without_caching', fetch_result=True) -%}
-    show table extended in {{ relation }} like '*'
+    show tables in {{ relation }} like '*'
   {% endcall %}
 
   {% do return(load_result('list_relations_without_caching').table) %}
@@ -234,12 +217,13 @@
 {% endmacro %}
 
 {% macro spark__alter_column_comment(relation, column_dict) %}
-  {% if config.get('file_format', validator=validation.any[basestring]) in ['delta', 'hudi'] %}
+  {% if config.get('file_format', validator=validation.any[basestring]) in ['delta', 'iceberg', 'hudi'] %}
     {% for column_name in column_dict %}
       {% set comment = column_dict[column_name]['description'] %}
       {% set escaped_comment = comment | replace('\'', '\\\'') %}
+      {# TODO: jcc DAP hardcoded iceberg sematic here #}
       {% set comment_query %}
-        alter table {{ relation }} change column
+        alter table {{ relation }} alter column
             {{ adapter.quote(column_name) if column_dict[column_name]['quote'] else column_name }}
             comment '{{ escaped_comment }}';
       {% endset %}
@@ -271,6 +255,11 @@
 
   {% if remove_columns %}
     {% set platform_name = 'Delta Lake' if relation.is_delta else 'Apache Spark' %}
+    {{ exceptions.raise_compiler_error(platform_name + ' does not support dropping columns from tables') }}
+  {% endif %}
+
+  {% if remove_columns %}
+    {% set platform_name = 'Iceberg' if relation.is_iceberg else 'Apache Spark' %}
     {{ exceptions.raise_compiler_error(platform_name + ' does not support dropping columns from tables') }}
   {% endif %}
 
