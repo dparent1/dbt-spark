@@ -162,10 +162,6 @@
   {% do return(load_result('get_columns_in_relation').table) %}
 {% endmacro %}
 
-{% macro spark__get_columns_in_relation(relation) -%}
-  {{ return(adapter.get_columns_in_relation(relation)) }}
-{% endmacro %}
-
 {% macro spark__list_relations_without_caching(relation) %}
   {% call statement('list_relations_without_caching', fetch_result=True) -%}
     show tables in {{ relation }} like '*'

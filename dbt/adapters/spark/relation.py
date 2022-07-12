@@ -47,9 +47,12 @@ class SparkRelation(BaseRelation):
     source_meta: Dict[str, Any] = None
     meta: Dict[str, Any] = None
 
-    # def __post_init__(self):
-    #     if self.database != self.schema and self.database:
-    #         raise RuntimeException('Cannot set database in spark!')
+    def __post_init__(self):
+        if (self.is_iceberg is not True and
+            self.database != self.schema and
+            self.database):
+            raise RuntimeException('Cannot set database in spark!')
+
     def load_python_module(self, start_time, end_time, **kwargs):
         logger.debug(f"SparkRelation create source for {self.identifier}")
         from pyspark.sql import SparkSession
