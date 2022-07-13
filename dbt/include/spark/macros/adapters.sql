@@ -155,6 +155,17 @@
   {%- endcall -%}
 {% endmacro %}
 
+{% macro get_columns_in_relation_raw(relation) -%}
+  {{ return(adapter.dispatch('get_columns_in_relation_raw', 'dbt')(relation)) }}
+{%- endmacro -%}
+
+{% macro spark__get_columns_in_relation_raw(relation) -%}
+  {% call statement('get_columns_in_relation_raw', fetch_result=True) %}
+      describe extended {{ relation.include(schema=(schema is not none)) }}
+  {% endcall %}
+  {% do return(load_result('get_columns_in_relation_raw').table) %}
+{% endmacro %}
+
 {% macro spark__get_columns_in_relation(relation) -%}
   {% call statement('get_columns_in_relation', fetch_result=True) %}
       describe extended {{ relation.include(schema=(schema is not none)) }}
@@ -164,7 +175,10 @@
 
 {% macro spark__list_relations_without_caching(relation) %}
   {% call statement('list_relations_without_caching', fetch_result=True) -%}
-    show tables in {{ relation }} like '*'
+    {#-- TODO: Check with JC when he is back, this went from show table to show table extended #}
+    {#-- TODO: Without this change the results in the spark list_relations_without_caching (impl.py) #}
+    {#-- TODO: have rows with only 3 entries instead of 4 generating an exception #}
+    show table extended in {{ relation }} like '*'
   {% endcall %}
 
   {% do return(load_result('list_relations_without_caching').table) %}
