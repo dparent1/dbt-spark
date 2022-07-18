@@ -149,10 +149,15 @@ class SparkAdapter(SQLAdapter):
 
             rel_type = RelationType.View if "Type: VIEW" in information else RelationType.Table
             is_delta = "Provider: delta" in information
-            is_iceberg = 'Provider: iceberg' in information
-            # TODO: DAP & jcc hardcoded for now, need a way to determine if table is iceberg or not
-            is_iceberg = True
             is_hudi = "Provider: hudi" in information
+            is_iceberg = 'Provider: iceberg' in information
+            # TODO: DAP & jcc falls back to iceberg if no provider specified
+            #                 this is a little bit better than overriding
+            #                 everything.  Ideally Provider: iceberg will start
+            #                 showing up in the row information
+            if is_delta is False and is_hudi is False and is_iceberg is False:
+                is_iceberg = True
+
             relation = self.Relation.create(
                 schema=schema_relation.schema,# _schema, jcc?  TODO: DAP
                 identifier=name,
