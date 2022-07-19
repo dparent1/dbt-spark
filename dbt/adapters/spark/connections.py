@@ -1,10 +1,5 @@
 from contextlib import contextmanager
 
-from pyspark import SparkConf
-import pyspark.sql.functions as F
-from pyspark.sql import SparkSession
-import sqlparams
-
 import dbt.exceptions
 from dbt.adapters.base import Credentials
 from dbt.adapters.sql import SQLConnectionManager
@@ -26,6 +21,7 @@ try:
 except ImportError:
     pyodbc = None
 from datetime import datetime
+import sqlparams
 
 
 from hologram.helpers import StrEnum
@@ -43,9 +39,6 @@ except ImportError:
 
 import base64
 import time
-import importlib
-import sqlalchemy
-import re
 
 logger = AdapterLogger("Spark")
 
@@ -61,7 +54,6 @@ class SparkConnectionMethod(StrEnum):
     HTTP = "http"
     ODBC = "odbc"
     SESSION = "session"
-    PYSPARK = "pyspark"
 
 
 @dataclass
@@ -83,8 +75,6 @@ class SparkCredentials(Credentials):
     use_ssl: bool = False
     server_side_parameters: Dict[str, Any] = field(default_factory=dict)
     retry_all: bool = False
-    python_module: Optional[str] = None
-    spark_configuration: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def __pre_deserialize__(cls, data):
