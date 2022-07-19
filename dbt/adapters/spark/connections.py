@@ -23,7 +23,6 @@ except ImportError:
 from datetime import datetime
 import sqlparams
 
-
 from hologram.helpers import StrEnum
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
