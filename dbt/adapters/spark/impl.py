@@ -159,7 +159,7 @@ class SparkAdapter(SQLAdapter):
                 is_iceberg = True
 
             relation = self.Relation.create(
-                schema=schema_relation.schema,# _schema, jcc?  TODO: DAP
+                schema=schema_relation.schema,
                 identifier=name,
                 type=rel_type,
                 information=information,
