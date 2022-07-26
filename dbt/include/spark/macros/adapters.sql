@@ -210,6 +210,10 @@
 {% endmacro %}
 
 {% macro list_relations_without_caching_no_extended(schema_relation) %}
+  {#-- We can't use temporary tables with `create ... as ()` syntax #}
+  {#-- Spark with iceberg tables don't work with show table extended for #}
+  {#-- V2 iceberg tables #}
+  {#-- https://issues.apache.org/jira/browse/SPARK-33393 #}
   {% call statement('list_relations_without_caching_no_extended', fetch_result=True) -%}
     show tables in {{ schema_relation }} like '*'
   {% endcall %}
@@ -218,6 +222,10 @@
 {% endmacro %}
 
 {% macro describe_table_extended_without_caching(table_name) %}
+  {#-- We can't use temporary tables with `create ... as ()` syntax #}
+  {#-- Spark with iceberg tables don't work with show table extended for #}
+  {#-- V2 iceberg tables #}
+  {#-- https://issues.apache.org/jira/browse/SPARK-33393 #}
   {% call statement('describe_table_extended_without_caching', fetch_result=True) -%}
     describe extended {{ table_name }}
   {% endcall %}

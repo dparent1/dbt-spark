@@ -151,6 +151,7 @@ class SparkAdapter(SQLAdapter):
                 return []
             elif "SHOW TABLE EXTENDED is not supported for v2 tables" in errmsg:
                 # this happens with spark-iceberg with v2 iceberg tables
+                # https://issues.apache.org/jira/browse/SPARK-33393
                 try_show_tables = True
             else:
                 description = "Error while retrieving information about"
@@ -179,14 +180,11 @@ class SparkAdapter(SQLAdapter):
                 )
 
             if try_show_tables:
-                print("in try_show_tables")
                 _, name, _ = row
                 information = self.use_show_tables(name)
             else:
-                print("in else of try_show_tables")
                 _schema, name, _, information = row
                 logger.debug(row)
-            print(f"information type is {type(information)}")
             is_delta = "Provider: delta" in information
             is_hudi = "Provider: hudi" in information
             is_iceberg = "Provider: iceberg" in information
