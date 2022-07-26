@@ -168,7 +168,6 @@ class SparkAdapter(SQLAdapter):
                 return []
 
         relations = []
-        information = ""
         for row in results:
             if len(row) != expected_result_rows:
                 if try_show_tables:
@@ -180,11 +179,14 @@ class SparkAdapter(SQLAdapter):
                 )
 
             if try_show_tables:
+                print("in try_show_tables")
                 _, name, _ = row
                 information = self.use_show_tables(name)
             else:
-                _schema, name, information, _ = row
+                print("in else of try_show_tables")
+                _schema, name, _, information = row
                 logger.debug(row)
+            print(f"information type is {type(information)}")
             is_delta = "Provider: delta" in information
             is_hudi = "Provider: hudi" in information
             is_iceberg = "Provider: iceberg" in information
