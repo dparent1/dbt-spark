@@ -26,6 +26,8 @@ logger = AdapterLogger("Spark")
 GET_COLUMNS_IN_RELATION_RAW_MACRO_NAME = "get_columns_in_relation_raw"
 LIST_SCHEMAS_MACRO_NAME = "list_schemas"
 LIST_RELATIONS_MACRO_NAME = "list_relations_without_caching"
+LIST_RELATIONS_NO_EXTENDED_MACRO_NAME = "list_relations_without_caching_no_extended"
+DESCRIBE_TABLE_EXTENDED_MACRO_NAME = "describe_table_extended_without_caching"
 DROP_RELATION_MACRO_NAME = "drop_relation"
 FETCH_TBL_PROPERTIES_MACRO_NAME = "fetch_tbl_properties"
 
@@ -121,42 +123,72 @@ class SparkAdapter(SQLAdapter):
         # so jinja doesn't render things
         return ""
 
+    def use_show_tables(self, table_name):
+        information = ""
+        kwargs = {"table_name": table_name}
+        try:
+            info_results = self.execute_macro(DESCRIBE_TABLE_EXTENDED_MACRO_NAME, kwargs=kwargs)
+        except dbt.exceptions.RuntimeException as e:
+            logger.debug(f"Error while retrieving information about {table_name}: {e.msg}")
+            return []
+        for info_row in info_results:
+            info_type, info_value, _ = info_row
+            information += f"{info_type}: {info_value}\n"
+        return information
+
     def list_relations_without_caching(
         self, schema_relation: SparkRelation
     ) -> List[SparkRelation]:
         logger.debug("list_relations_without_caching")
         kwargs = {"schema_relation": schema_relation}
+        try_show_tables = False
+        expected_result_rows = 4
         try:
             results = self.execute_macro(LIST_RELATIONS_MACRO_NAME, kwargs=kwargs)
         except dbt.exceptions.RuntimeException as e:
             errmsg = getattr(e, "msg", "")
             if f"Database '{schema_relation}' not found" in errmsg:
                 return []
+            elif "SHOW TABLE EXTENDED is not supported for v2 tables" in errmsg:
+                # this happens with spark-iceberg with v2 iceberg tables
+                try_show_tables = True
             else:
                 description = "Error while retrieving information about"
                 logger.debug(f"{description} {schema_relation}: {e.msg}")
                 return []
 
-        relations = []
-        for row in results:
-            if len(row) != 4:
-                raise dbt.exceptions.RuntimeException(
-                    f'Invalid value from "show table extended ...", '
-                    f"got {len(row)} values, expected 4"
-                )
-            _schema, name, _, information = row
-            logger.debug(row)
+        if try_show_tables:
+            expected_result_rows = 3
+            try:
+                results = self.execute_macro(LIST_RELATIONS_NO_EXTENDED_MACRO_NAME, kwargs=kwargs)
+            except dbt.exceptions.RuntimeException as e:
+                errmsg = getattr(e, "msg", "")
+                description = "Error while retrieving information about"
+                logger.debug(f"{description} {schema_relation}: {e.msg}")
+                return []
 
-            rel_type = RelationType.View if "Type: VIEW" in information else RelationType.Table
+        relations = []
+        information = ""
+        for row in results:
+            if len(row) != expected_result_rows:
+                if try_show_tables:
+                    description = 'Invalid value from "show tables ...", '
+                else:
+                    description = 'Invalid value from "show table extended ...", '
+                raise dbt.exceptions.RuntimeException(
+                    f"{description} got {len(row)} values, expected {expected_result_rows}"
+                )
+
+            if try_show_tables:
+                _, name, _ = row
+                information = self.use_show_tables(name)
+            else:
+                _schema, name, information, _ = row
+                logger.debug(row)
             is_delta = "Provider: delta" in information
             is_hudi = "Provider: hudi" in information
-            is_iceberg = 'Provider: iceberg' in information
-            # TODO: DAP & jcc falls back to iceberg if no provider specified
-            #                 this is a little bit better than overriding
-            #                 everything.  Ideally Provider: iceberg will start
-            #                 showing up in the row information
-            if is_delta is False and is_hudi is False and is_iceberg is False:
-                is_iceberg = True
+            is_iceberg = "Provider: iceberg" in information
+            rel_type = RelationType.View if "Type: VIEW" in information else RelationType.Table
 
             relation = self.Relation.create(
                 schema=schema_relation.schema,
@@ -282,7 +314,7 @@ class SparkAdapter(SQLAdapter):
         return columns
 
     def _get_columns_for_catalog(self, relation: SparkRelation) -> Iterable[Dict[str, Any]]:
-         # TODO: DAP cccs-jc In the case of iceberg
+        # TODO: DAP cccs-jc In the case of iceberg
         # we do not have information on the relation
         # cannot issue a show tables extended in
         # Instead we do like delta lake get_columns_in_relation

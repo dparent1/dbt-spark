@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from dbt.adapters.base.relation import BaseRelation, Policy
 from dbt.exceptions import RuntimeException
 from dbt.events import AdapterLogger
+
 logger = AdapterLogger("Spark")
 
 from typing import Optional, TypeVar, Any, Type, Dict, Union, Iterator, Tuple, Set
@@ -19,6 +20,7 @@ import os
 import sys
 
 from datetime import timezone, datetime
+
 
 @dataclass
 class SparkQuotePolicy(Policy):
@@ -48,18 +50,18 @@ class SparkRelation(BaseRelation):
     meta: Dict[str, Any] = None
 
     def __post_init__(self):
-        if (self.is_iceberg is not True and
-            self.database != self.schema and
-            self.database):
-            raise RuntimeException('Cannot set database in spark!')
+        if self.is_iceberg is not True and self.database != self.schema and self.database:
+            raise RuntimeException("Cannot set database in spark!")
 
+    # TODO: this might not be accepted as part of the change
     def load_python_module(self, start_time, end_time, **kwargs):
         logger.debug(f"SparkRelation create source for {self.identifier}")
         from pyspark.sql import SparkSession
+
         spark = SparkSession.builder.getOrCreate()
-        if self.meta and self.meta.get('python_module'):
+        if self.meta and self.meta.get("python_module"):
             path = f"{self.meta.get('python_module')}"
-        elif self.source_meta and self.source_meta.get('python_module'):
+        elif self.source_meta and self.source_meta.get("python_module"):
             path = f"{self.source_meta.get('python_module')}"
         if path:
             logger.debug(f"SparkRelation attempting to load generic python module {path}")
@@ -74,7 +76,7 @@ class SparkRelation(BaseRelation):
             f_date = datetime.fromtimestamp(mod_time).strftime("%Y%m%d%H%M%S")
             s_date = start_time.strftime("%Y%m%d%H%M%S")
             e_date = end_time.strftime("%Y%m%d%H%M%S")
-            view_name = f'{self.identifier}_{f_date}_{s_date}_{e_date}'
+            view_name = f"{self.identifier}_{f_date}_{s_date}_{e_date}"
             if spark.catalog._jcatalog.tableExists(view_name):
                 logger.debug(f"View {view_name} already exists")
             else:
@@ -87,7 +89,8 @@ class SparkRelation(BaseRelation):
                     table_name=self.identifier,
                     start_time=start_time,
                     end_time=end_time,
-                    **kwargs)
+                    **kwargs,
+                )
                 df.createOrReplaceTempView(view_name)
             # Return a relation which only has a table name (spark view have no catalog or schema)
             return SparkRelation.create(database=None, schema=None, identifier=view_name)

@@ -203,13 +203,25 @@
 
 {% macro spark__list_relations_without_caching(relation) %}
   {% call statement('list_relations_without_caching', fetch_result=True) -%}
-    {#-- TODO: Check with JC when he is back, this went from show table to show table extended #}
-    {#-- TODO: Without this change the results in the spark list_relations_without_caching (impl.py) #}
-    {#-- TODO: have rows with only 3 entries instead of 4 generating an exception #}
     show table extended in {{ relation }} like '*'
   {% endcall %}
 
   {% do return(load_result('list_relations_without_caching').table) %}
+{% endmacro %}
+
+{% macro list_relations_without_caching_no_extended(schema_relation) %}
+  {% call statement('list_relations_without_caching_no_extended', fetch_result=True) -%}
+    show tables in {{ schema_relation }} like '*'
+  {% endcall %}
+
+  {% do return(load_result('list_relations_without_caching_no_extended').table) %}
+{% endmacro %}
+
+{% macro describe_table_extended_without_caching(table_name) %}
+  {% call statement('describe_table_extended_without_caching', fetch_result=True) -%}
+    describe extended {{ table_name }}
+  {% endcall %}
+  {% do return(load_result('describe_table_extended_without_caching').table) %}
 {% endmacro %}
 
 {% macro spark__list_schemas(database) -%}
