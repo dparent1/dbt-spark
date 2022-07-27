@@ -127,13 +127,14 @@ class SparkAdapter(SQLAdapter):
         information = ""
         kwargs = {"table_name": table_name}
         try:
-            info_results = self.execute_macro(DESCRIBE_TABLE_EXTENDED_MACRO_NAME, kwargs=kwargs)
+            table_results = self.execute_macro(DESCRIBE_TABLE_EXTENDED_MACRO_NAME, kwargs=kwargs)
         except dbt.exceptions.RuntimeException as e:
             logger.debug(f"Error while retrieving information about {table_name}: {e.msg}")
             return []
-        for info_row in info_results:
+        for info_row in table_results:
             info_type, info_value, _ = info_row
-            information += f"{info_type}: {info_value}\n"
+            if info_type.startswith("#") is False:
+                information += f"{info_type}: {info_value}\n"
         return information
 
     def list_relations_without_caching(
