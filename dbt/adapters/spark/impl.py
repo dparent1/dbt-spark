@@ -316,11 +316,6 @@ class SparkAdapter(SQLAdapter):
         return columns
 
     def _get_columns_for_catalog(self, relation: SparkRelation) -> Iterable[Dict[str, Any]]:
-        # TODO: DAP cccs-jc In the case of iceberg
-        # we do not have information on the relation
-        # cannot issue a show tables extended in
-        # Instead we do like delta lake get_columns_in_relation
-
         columns = []
         if relation and relation.information:
             columns = self.parse_columns_from_information(relation)
@@ -349,11 +344,13 @@ class SparkAdapter(SQLAdapter):
     def get_catalog(self, manifest):
         schema_map = self._get_catalog_schemas(manifest)
         # TODO: DAP jcc removed this check, not sure why I get two catalogs and why there is a check here..
-        # if len(schema_map) > 1:
-        #     dbt.exceptions.raise_compiler_error(
-        #         f'Expected only one database in get_catalog, found '
-        #         f'{list(schema_map)}'
-        #     )
+        # DAP: I've put this back and the jaffle shop dbt run works but from
+        # setting a breakpoint I can see it does not exercise this code.  I will
+        # need another testcase that gets me in here to see what is happening.
+        if len(schema_map) > 1:
+            dbt.exceptions.raise_compiler_error(
+                f"Expected only one database in get_catalog, found " f"{list(schema_map)}"
+            )
 
         with executor(self.config) as tpe:
             futures: List[Future[agate.Table]] = []
