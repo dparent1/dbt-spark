@@ -289,11 +289,16 @@
     {% for column_name in column_dict %}
       {% set comment = column_dict[column_name]['description'] %}
       {% set escaped_comment = comment | replace('\'', '\\\'') %}
-      {# TODO: jcc DAP hardcoded iceberg sematic here #}
       {% set comment_query %}
-        alter table {{ relation }} alter column
-            {{ adapter.quote(column_name) if column_dict[column_name]['quote'] else column_name }}
-            comment '{{ escaped_comment }}';
+        {% if relation.is_iceberg %}
+          alter table {{ relation }} alter column
+              {{ adapter.quote(column_name) if column_dict[column_name]['quote'] else column_name }}
+              comment '{{ escaped_comment }}';
+        {% else %}
+          alter table {{ relation }} change column
+              {{ adapter.quote(column_name) if column_dict[column_name]['quote'] else column_name }}
+              comment '{{ escaped_comment }}';
+        {% endif %}
       {% endset %}
       {% do run_query(comment_query) %}
     {% endfor %}
