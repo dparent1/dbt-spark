@@ -32,7 +32,7 @@
 
   {% set merge_condition %}
     {% if unique_key %}
-        {# jcc DAP we added support for multiple join condition, multiple unique_key #}
+        {# added support for multiple join condition, multiple unique_key #}
         on  {% if unique_key is string %}
               DBT_INTERNAL_SOURCE.{{ unique_key }} = DBT_INTERNAL_DEST.{{ unique_key }}
             {% else %}
