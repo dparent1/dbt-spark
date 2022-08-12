@@ -15,7 +15,7 @@
 {% macro spark__snapshot_merge_sql(target, source, insert_cols) -%}
 
     merge into {{ target }} as DBT_INTERNAL_DEST
-    {% if source.is_iceberg %}
+    {% if target.is_iceberg %}
       {# TODO: DAP added if/else, jcc: create view only supports a name (no catalog, or schema) #}
       using {{ source.identifier }} as DBT_INTERNAL_SOURCE
     {% else %}
