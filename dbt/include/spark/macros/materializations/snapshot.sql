@@ -16,7 +16,7 @@
 
     merge into {{ target }} as DBT_INTERNAL_DEST
     {% if target.is_iceberg %}
-      {# TODO: DAP added if/else, jcc: create view only supports a name (no catalog, or schema) #}
+      {# create view only supports a name (no catalog, or schema) #}
       using {{ source.identifier }} as DBT_INTERNAL_SOURCE
     {% else %}
       using {{ source }} as DBT_INTERNAL_SOURCE
