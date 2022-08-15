@@ -343,10 +343,6 @@ class SparkAdapter(SQLAdapter):
 
     def get_catalog(self, manifest):
         schema_map = self._get_catalog_schemas(manifest)
-        # TODO: DAP jcc removed this check, not sure why I get two catalogs and why there is a check here..
-        # DAP: I've put this back and the jaffle shop dbt run works but from
-        # setting a breakpoint I can see it does not exercise this code.  I will
-        # need another testcase that gets me in here to see what is happening.
         if len(schema_map) > 1:
             dbt.exceptions.raise_compiler_error(
                 f"Expected only one database in get_catalog, found " f"{list(schema_map)}"
